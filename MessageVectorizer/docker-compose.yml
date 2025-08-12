@@ -1,0 +1,9 @@
+version: '3.8'
+
+services:
+  message-vectorizer:
+    build: .
+    volumes:
+      - .:/app
+    working_dir: /app
+    command: julia examples/message_vectorizer_demo.jl
