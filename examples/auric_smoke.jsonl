@@ -1,0 +1,16 @@
+{"text":"def add(a, b):\n    return a + b\n\nThe add function returns the sum of two numbers.","group":"arithmetic-add","source":"AURIC authored smoke fixture"}
+{"text":"def subtract(a, b):\n    return a - b\n\nThe subtract function returns the difference of two numbers.","group":"arithmetic-subtract","source":"AURIC authored smoke fixture"}
+{"text":"def multiply(a, b):\n    return a * b\n\nThe multiply function returns the product of two numbers.","group":"arithmetic-multiply","source":"AURIC authored smoke fixture"}
+{"text":"def is_even(number):\n    return number % 2 == 0\n\nAn even integer has remainder zero when divided by two.","group":"parity","source":"AURIC authored smoke fixture"}
+{"text":"def first(items):\n    return items[0] if items else None\n\nCheck whether the list is empty before reading its first item.","group":"list-first","source":"AURIC authored smoke fixture"}
+{"text":"def last(items):\n    return items[-1] if items else None\n\nA negative index of minus one selects the last item.","group":"list-last","source":"AURIC authored smoke fixture"}
+{"text":"def reverse_text(text):\n    return text[::-1]\n\nThe slice steps backwards through the string.","group":"text-reverse","source":"AURIC authored smoke fixture"}
+{"text":"def square(number):\n    return number * number\n\nThe square of a number is the number multiplied by itself.","group":"arithmetic-square","source":"AURIC authored smoke fixture"}
+{"text":"def total(items):\n    result = 0\n    for item in items:\n        result += item\n    return result\n\nAccumulate each item into the running total.","group":"list-total","source":"AURIC authored smoke fixture"}
+{"text":"def greeting(name):\n    return f'Hello, {name}!'\n\nReturn the greeting rather than printing it.","group":"text-greeting","source":"AURIC authored smoke fixture"}
+{"text":"def clamp(value, low, high):\n    return max(low, min(value, high))\n\nClamp assumes low is no greater than high.","group":"arithmetic-clamp","source":"AURIC authored smoke fixture"}
+{"text":"def nonempty(items):\n    return [item for item in items if item]\n\nA comprehension can filter false values out of a collection.","group":"list-filter","source":"AURIC authored smoke fixture"}
+{"text":"A checkpoint stores model weights and optimizer state. Resume also restores the sampling state so training can continue reproducibly.","group":"training-resume","source":"AURIC authored smoke fixture"}
+{"text":"Keep validation documents separate from training documents. Measure loss on unseen examples to check whether learning transfers beyond memorization.","group":"training-validation","source":"AURIC authored smoke fixture"}
+{"text":"Read the error message, locate the failing function, write a small test, change the code, and run the test again.","group":"debugging","source":"AURIC authored smoke fixture"}
+{"text":"Project memory records decisions and their sources. Updating a decision creates a new revision while preserving the previous record.","group":"memory","source":"AURIC authored smoke fixture"}

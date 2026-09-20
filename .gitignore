@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+*_env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment files
+.env
+.env.local
+*.credentials.json
+
+# Large files (use Git LFS instead)
+*.zip
+*.tar.gz
+*.7z
+*.bin
+*.pkl
+*.pt
+*.pth
+*.onnx
+*.safetensors
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Logs
+*.log
+
+# Node (for qwen-code etc.)
+node_modules/
+
+# Local AURIC datasets, checkpoints, knowledge and run reports
+artifacts/
+auric_data/
