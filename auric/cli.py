@@ -3,6 +3,7 @@ import argparse
 from dataclasses import asdict, replace
 import json
 from pathlib import Path
+import sqlite3
 import sys
 
 
@@ -127,7 +128,85 @@ def parser():
     hub.add_argument("--revision", required=True)
     hub.add_argument("--kind", choices=("datasets", "models"), default="datasets")
     hub.add_argument("--output", required=True)
+    mcp = sub.add_parser("mcp", help="MCP stdio server for Claude Code and Codex sessions (Porter + local index)")
+    mcp.add_argument("--porter-db", help="Shared ledger (default $AURIC_PORTER_DB or ~/.local/share/auric/porter.sqlite)")
+    mcp.add_argument("--knowledge-db", help="AURIC knowledge index (default $AURIC_KNOWLEDGE_DB or artifacts/knowledge.sqlite)")
+    porter = sub.add_parser("porter", help="See and steer the agent sessions working on your projects")
+    porter.add_argument("--db", help="Shared ledger (default $AURIC_PORTER_DB or ~/.local/share/auric/porter.sqlite)")
+    porter.add_argument("--project", help="Project root (default: Git root of the current directory)")
+    psub = porter.add_subparsers(dest="porter_command", required=True)
+    st = psub.add_parser("status", help="Directives, questions waiting on you, live sessions, recent notes")
+    st.add_argument("--json", action="store_true")
+    st = psub.add_parser("steer", help="Add a directive every session sees in its brief")
+    st.add_argument("text")
+    st.add_argument("--kind", choices=("priority", "constraint", "preference", "scope", "protect"), default="priority")
+    st.add_argument("--paths", nargs="+", default=[], help="scope/protect path patterns, relative to the project")
+    st.add_argument("--rank", type=int, help="Order within its kind (default: after existing ones)")
+    st.add_argument("--global", dest="global_", action="store_true", help="Apply to every project")
+    st = psub.add_parser("retire", help="Retire a directive")
+    st.add_argument("id", type=int)
+    st = psub.add_parser("answer", help="Answer a question from a session; every session is notified")
+    st.add_argument("id", type=int)
+    st.add_argument("text")
+    st = psub.add_parser("say", help="Message the sessions (all by default)")
+    st.add_argument("text")
+    st.add_argument("--to", default="*", help="Session id or agent name (claude-code, codex)")
+    st = psub.add_parser("end", help="End a session and release its claims")
+    st.add_argument("session")
+    st.add_argument("--reason", default="ended by the user")
+    st = psub.add_parser("history", help="Search coordination history")
+    st.add_argument("query", nargs="?")
+    st.add_argument("--kinds", nargs="+")
+    st.add_argument("--limit", type=int, default=30)
+    st = psub.add_parser("watch", help="Follow new events as they happen (Ctrl-C to stop)")
+    st.add_argument("--interval", type=float, default=2.0)
     return p
+
+
+def porter_command(args):
+    import time
+    from .porter import GLOBAL, Porter, find_project, origin, parse, render_status
+    project = str(Path(args.project).resolve()) if args.project else find_project()
+    cmd, via = args.porter_command, origin()
+    with Porter(args.db) as porter:
+        if cmd == "status":
+            status = porter.status(project)
+            if args.json:
+                emit(status)
+            else:
+                print(render_status(status))
+        elif cmd == "steer":
+            target = GLOBAL if args.global_ else project
+            directive = porter.steer(target, args.kind, args.text, paths=args.paths, rank=args.rank, via=via)
+            emit({"directive": directive, "project": target, "via": via})
+        elif cmd == "retire":
+            porter.retire(args.id, via=via)
+            emit({"retired": args.id})
+        elif cmd == "answer":
+            emit(porter.answer(args.id, args.text, via=via))
+        elif cmd == "say":
+            emit({"event": porter.say(project, args.text, to=args.to, via=via), "to": args.to})
+        elif cmd == "end":
+            emit(porter.end(args.session, args.reason + ("" if via == "terminal" else f" [via {via}]"), actor="user"))
+        elif cmd == "history":
+            emit(porter.history(project, query=args.query, kinds=args.kinds, limit=args.limit))
+        elif cmd == "watch":
+            last = porter.history(project, limit=1)
+            last = last[-1]["id"] if last else 0
+            print(f"Watching {project} (Ctrl-C to stop)", flush=True)
+            try:
+                while True:
+                    for e in porter.history(project, limit=200):
+                        if e["id"] > last:
+                            last = e["id"]
+                            when = parse(e["created"]).astimezone().strftime("%H:%M:%S")
+                            to = f" -> {e['to']}" if e["to"] else ""
+                            paths = f" [{', '.join(e['paths'][:6])}]" if e["paths"] else ""
+                            print(f"{when} {e['actor']}{to} {e['kind']}: {e['message']}{paths}", flush=True)
+                    time.sleep(args.interval)
+            except KeyboardInterrupt:
+                pass
+    return 0
 
 
 def run(args):
@@ -249,6 +328,11 @@ def run(args):
     elif cmd == "hub-fetch":
         from .hub import fetch_data
         emit(fetch_data(args.repo, args.filename, args.revision, args.output, kind=args.kind))
+    elif cmd == "mcp":
+        from .mcp_server import main as serve
+        return serve(porter_db=args.porter_db, knowledge_db=args.knowledge_db)
+    elif cmd == "porter":
+        return porter_command(args)
     return 0
 
 
@@ -259,7 +343,7 @@ def main():
             import torch
             torch.set_num_threads(2)
         code = run(args)
-    except (ValueError, OSError, KeyError, RuntimeError) as exc:
+    except (ValueError, OSError, KeyError, RuntimeError, sqlite3.Error) as exc:
         print(f"auric: {exc}", file=sys.stderr)
         code = 2
     raise SystemExit(code or 0)

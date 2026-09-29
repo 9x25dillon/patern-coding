@@ -32,6 +32,24 @@ See [build verification](docs/AURIC_VERIFICATION.md),
 [architecture and experiments](docs/AURIC_ARCHITECTURE.md), and
 [Hugging Face inventory findings](docs/AURIC_HUB.md).
 
+## Porter: steer concurrent Claude Code and Codex sessions
+
+Run Claude Code and Codex on the same project at once without them colliding or
+drifting. Both CLIs call the `auric` MCP server (`python -m auric mcp`). Through it
+they share one local ledger: who is working on what, which files each has claimed, your
+directives, questions waiting on you, and handoffs to the next session.
+
+```bash
+auric porter status                                   # every session, claims, questions for you
+auric porter steer "Priority: corpus pipeline first"  # every session sees it in its brief
+auric porter steer "Hands off" --kind protect --paths MessageVectorizer
+auric porter answer 3 "Yes, hold out week 3"          # broadcast to all sessions
+```
+
+Agents use `porter_checkin`, `porter_claim`, `porter_note`, `porter_ask_user`, and
+`porter_checkout`; `/porter` (Claude Code) or `$porter` (Codex) runs a sync. Setup,
+semantics and limits: **[docs/PORTER.md](docs/PORTER.md)**.
+
 ## Earlier research service notes: ChaosRAGJulia
 
 A compact Julia service that unifies a **KFP chaos router**, **HHT/EEMD** time–frequency analytics, and **OpenAI-based RAG** for crypto research.

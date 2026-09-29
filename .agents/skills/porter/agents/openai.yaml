@@ -1,0 +1,6 @@
+interface:
+  display_name: "Porter"
+  short_description: "Sync with the other agent sessions and the user's directives"
+  default_prompt: "Use $porter to check in, show what every Claude Code and Codex session is doing, surface decisions waiting on me, and realign with my directives."
+policy:
+  allow_implicit_invocation: true

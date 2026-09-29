@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "auric-local"
-version = "0.1.0"
-description = "Small from-scratch language models and a local coding workbench"
+version = "0.2.0"
+description = "Small from-scratch language models, a local coding workbench, and Porter for concurrent agent sessions"
 requires-python = ">=3.10"
 dependencies = ["torch>=2.4", "numpy>=1.24"]
 
