@@ -124,9 +124,11 @@ shows them to the model; `AGENTS.md` and the skill cover the rest.
   agent could still run `auric porter steer` through its shell. That is not blocked,
   but it is labelled: the ledger records `set from claude-code shell` (or `codex
   shell`), and both `status` and the agents' brief show it.
-- **Agents only hear from Porter when they call a tool.** There is no push into a
-  running conversation. The skill and `AGENTS.md` tell agents to check the inbox
-  between steps.
+- **The base MCP protocol is pull-based.** The skill and `AGENTS.md` tell agents to
+  check the inbox between steps. Optional [lifecycle reflexes](PORTER_REFLEXES.md)
+  add automatic startup context, edit-lease checks, and compaction checkpoints;
+  install and verify those adapters separately. There is no unsolicited peer-chat
+  delivery or background message loop.
 
 ## Data and privacy
 
@@ -153,9 +155,9 @@ When no index exists, it tells the agent how you can build one.
 
 ## Possible next steps
 
-- Claude Code `SessionStart` / `PreToolUse` hooks that print the brief at startup and
-  warn before editing a file another session holds. These would turn the advisory
-  protocol into an automatic check for Claude sessions.
+- Activate and verify the implemented [Claude/Codex lifecycle hooks and pre-push
+  consent gate](PORTER_REFLEXES.md) in the real clients. The adapter tests pass;
+  live hook loading and shared MCP ownership still need evidence.
 - A read-only web or TUI dashboard over the same ledger.
 - Let accepted `decision` notes become AURIC memories on your confirmation, so the
   local assistant's retrieval sees the project's decisions.

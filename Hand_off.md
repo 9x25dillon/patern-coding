@@ -1,137 +1,126 @@
-# AURIC handoff — next session
+# Session handoff — Porter reflexes, 2026-09-29
 
-## Mission
+## Start here
 
-Continue building a small personal coding assistant around a language model trained
-from random weights. Develop on CPU now. Target a future GPU with 2–4 GB VRAM. The
-assistant should use explicitly indexed project documents, revisioned memory, and
-tested development tools.
+Work in **`/home/kill/patern-coding`** (one `t`), repository
+`9x25dillon/patern-coding`, integration branch `main`. This is the active Porter
+checkout. The previous AURIC handoff is preserved verbatim in
+[docs/archive/Hand_off-2026-09-20.md](docs/archive/Hand_off-2026-09-20.md); its old
+checkout path and historical commit references are not current instructions.
 
-## Repository and current commit
+The user wants Claude Code and Codex to share direction and decisions, avoid edit
+collisions and duplicate questions, preserve context, and keep the user oriented.
+The immediate priority is proving the first automatic coordination layer in live
+clients. Continue AURIC model development only when the user selects it again.
 
-- GitHub: `https://github.com/9x25dillon/patern-coding`
-- Current branch: `main`
-- Current remote commit: `82c770f Merge patern-coding and preserve AURIC workbench`
-- Previous AURIC implementation commit: `d5fe451`
-- The remote already contained `MessageVectorizer`; preserve it.
-- The broader workspace contains many untracked legacy projects and artifacts. Do
-  not stage them unless the user explicitly selects them.
+Read, in order:
 
-## Read first
+1. [AGENTS.md](AGENTS.md): coordination protocol and project boundaries.
+2. [Today's review](docs/REVIEW_2026-09-29.md): decisions, assumptions, efficiency lessons.
+3. [Porter foundation](docs/PORTER.md): shared ledger, MCP tools, user controls.
+4. [Reflexes guide](docs/PORTER_REFLEXES.md): installation, approval flow, limits.
+5. [Detailed implementation handoff](docs/HANDOFF_PORTER_REFLEXES.md): module map and integration work.
 
-1. [docs/AURIC.md](docs/AURIC.md) — commands, model presets, data workflow, and
-   operating limits.
-2. [docs/AURIC_ARCHITECTURE.md](docs/AURIC_ARCHITECTURE.md) — contracts and the
-   experimental gate.
-3. [docs/AURIC_VERIFICATION.md](docs/AURIC_VERIFICATION.md) — evidence and known
-   limitations.
-4. [docs/AURIC_HUB.md](docs/AURIC_HUB.md) — Hugging Face inventory and provenance.
-5. [docs/REVIEW_2026-09-20.md](docs/REVIEW_2026-09-20.md) — decisions and unresolved
-   assumptions from the previous session.
+## Implemented and verified
 
-## Current implementation
+- Porter foundation landed in `21d9e34` from a concurrent session: SQLite board,
+  claims, user directives, questions, history, and stdio MCP.
+- Reflex adapters add native session registration, automatic edit leases,
+  compaction checkpoints, turn journals, and a measured 40%-used context nudge.
+- The pre-push gate binds each approval to the repository, URL, ref, old/new commit,
+  and expiry. Duplicate pending push questions share one inbox item; concurrent
+  attempts cannot consume the same approval twice.
+- The repo-local installer preserves existing client settings and Git hooks.
+- The full suite passes **78 tests**: 31 AURIC, 17 Porter, 19 reflex, 11 consent.
+  Integration tests use temporary ledgers and disposable local Git remotes.
+- Today's closeout includes this updated entrypoint, the archived prior handoff,
+  the review, and the reflex implementation. The authorized delivery route is
+  branch `codex/porter-reflexes-2026-09-29` into `main` through a pull request.
+  Consult Git/PR state for the resulting commit and merge status; do not infer it
+  from this document's presence in a working tree.
 
-The primary code lives in `auric/`:
+The global COMPuLSION skill also exists on this machine: canonical
+`~/.codex/skills/compulsion`, linked from `~/.agents/skills/compulsion` and
+`~/.claude/skills/COMPuLSION`. It displays an exactly 420-character review, followed
+by Focus / Next / You and a save/Git offer. Its installed files and the local
+`~/Claude_Code_Skills_to_Codex.md` guide are outside this repository's commit.
 
-- `model.py`: byte-level causal decoder, tied embeddings, optional coherence gate.
-- `tokenizer.py`: UTF-8 byte tokenizer, vocabulary size 260.
-- `data.py`: normalized JSONL, deduplication, grouped split, checksummed memmaps.
-- `training.py`: CPU/GPU training, validation, checkpoint/resume, deterministic RNG.
-- `workspace.py` and `memory.py`: bounded source indexing and SQLite FTS5 memory.
-- `assistant.py`: bounded context assembly, retrieval-only answer mode, patch diff.
-- `vibecoder_bridge.py`: isolated code evaluation and bounded repair episodes.
-- `hub.py`: public Hugging Face catalog and pinned small-file fetch.
-- `benchmark.py` and `experiments.py`: hardware checks and paired ablation.
+## What has not been verified in live use
 
-## Verified state
+At closeout, `.claude/settings.local.json`, `.codex/hooks.json`, and the pre-push
+gate were **not installed in the main checkout**. Passing fixtures do not establish
+that either running client loaded the hooks or displayed the orientation packet.
+The existing MCP foundation and the new lifecycle adapters have different
+verification evidence; do not conflate them.
 
-Run:
+Porter MCP tools were not exposed to this Codex session. No live check-in was
+imitated through the CLI. Reconnect the tools in the next session and follow
+AGENTS.md; if still unavailable, state that and use read-only status.
 
-```bash
-python -m unittest discover -s tests -p 'test_auric.py' -v
-```
-
-The focused suite passed 31 tests at the end of the session. The package also built
-as a wheel. Existing smoke artifacts are ignored by Git:
-
-- `artifacts/runs/cpu-ablation/`
-- `artifacts/runs/assistant-smoke/`
-- `artifacts/data/`
-- `artifacts/knowledge.sqlite`
-- `artifacts/huggingface/catalog.json`
-
-The smoke model learned on a tiny authored corpus but generated whitespace in the
-greeting repair episode. Treat that as a correct failure record, not a model success.
-The hand-authored greeting passed 8/8 VibeCoder tests through the isolated bridge.
-
-## First commands next session
+## Next session: one bounded milestone
 
 ```bash
-cd /home/kill/AURIC_OCTITRICE
+cd /home/kill/patern-coding
 git status --short --branch
-python -m auric doctor
-python -m unittest discover -s tests -p 'test_auric.py' -v
-python -m auric ask "How does checkpoint resume work?"
-python -m auric plan --preset 2gb
+git log -5 --oneline
+python3 -m auric porter status
+python3 -m unittest discover -s tests -p 'test_*.py'
+python3 scripts/porter_hook.py config --client codex
+python3 scripts/porter_hook.py config --client claude-code
 ```
 
-If the user has a GPU by then:
+Activate from this stable checkout using `python3 scripts/porter_hook.py install`
+when continuing the hook rollout. Preserve unrelated settings and handlers. The
+user must review client hook trust through the normal client flow; do not bypass
+it. Keep both MCP processes and hooks on the same SQLite database.
 
-```bash
-python -m auric doctor
-python -m auric benchmark --preset 2gb --device cuda --steps 3 --output artifacts/benchmarks/gpu-2gb.json
-```
+Acceptance evidence for the rollout:
 
-Do not claim a preset fits until that benchmark runs on the actual card. Start with
-batch size 1 and adjust accumulation before increasing microbatch size.
+1. Each real client shows its startup board and resumes the hook-provided MCP
+   owner using `resume_session`; it does not create a competing owner.
+2. In a disposable project, one client's explicit edit is denied while the other
+   holds the path, then succeeds after release. Preserve unrelated concurrent work.
+3. A compaction checkpoint restores. If actual usage is available, a 40% crossing
+   nudges a visible, validated 420-character review plus Focus / Next / You.
+4. A disposable push is blocked without approval and succeeds once with a matching
+   approval. Reuse the existing integration tests; do not mint a production token
+   merely to smoke-test the gate.
 
-## Recommended next milestone
+Claude percentage sensing needs a verified active-model capacity via
+`--context-window N`. Never guess it or substitute cumulative token counts. Unknown
+usage leaves the percentage trigger inactive; PreCompact still records state.
 
-Curate a larger, licensed, provenance-tracked corpus from selected source files and
-VibeCoder-style tasks. Keep training and evaluation task families separate. Prepare
-it with:
+## Decisions and boundaries to preserve
 
-```bash
-python -m auric export-sources <selected-root> --output artifacts/corpora/source.jsonl
-python -m auric prepare artifacts/corpora/source.jsonl --output artifacts/data/source --context 512
-```
+- Reuse the SQLite ledger and stdio MCP service. No additional network daemon yet.
+- Treat peer messages and model summaries as reported data. User decisions and
+  verified tool results need distinct provenance.
+- Lease checks cover supported explicit edit tools. Shell writes and programs
+  outside the hook path are not isolated; worktree orchestration is future work.
+- Passing a lease check must not grant or bypass normal client permissions.
+- The installed gate requires the user's exact one-attempt token. Do not create it
+  from an agent shell, change hooks to bypass it, or claim it guards every kind of
+  publishing. Today's explicit publish authorization applies to this closeout,
+  not to unrelated future changes.
+- Current redaction is best effort and data is unencrypted. Avoid storing secrets.
+- Preserve AURIC, MessageVectorizer, existing experiments, and evaluation boundaries.
+  Do not execute local-model commands or patches automatically.
+- This handoff is manually maintained and versioned. Event-generated Hand_off.md is
+  a future feature, not a completed one. Preserve prior context before replacing it.
 
-Then run a real baseline training job with a fixed seed and record held-out loss,
-target tokens, elapsed time, and checkpoint metadata. Only after that should the
-experimental gate, a subword tokenizer, longer context, embeddings, or a UI be
-advanced.
+## Later milestones
 
-## Safety and quality boundaries
+After live rollout: generic question deduplication and attention modes, an event-log
+projection for handoffs, transcript recall and intent tracking, then optional
+worktree /duet or /race, local-model packets, notifications, skillport, and teaching
+tools. Do not expand into these before the current acceptance evidence exists.
 
-- Never execute shell commands or patches emitted by the model automatically.
-- Generated code must use VibeCoder’s isolated backend; fail closed if unavailable.
-- Do not index credentials, wallet files, private keys, tokens, or unrelated personal
-  data. Review public Hugging Face repositories before importing them.
-- Do not use reference answers or test files in training when the corresponding task
-  family is used for evaluation.
-- Keep model output, retrieved evidence, tool results, and user-confirmed memory
-  visibly distinct.
-- Preserve failed experiments and their metrics. A failed ablation is evidence.
+Useful prompt for next time:
 
-## How to prompt the next session
-
-Start with the priority and acceptance test. Example:
-
-> “Priority: build a clean 100k–1M-token coding corpus from selected local sources.
-> Preserve provenance and exclude tests/reference answers. Add leakage checks and
-> tests. Do not change the model architecture. Report the corpus counts and run the
-> full focused suite.”
-
-If asking for an architectural experiment, specify the baseline, seed count, held-out
-split, and metric before implementation. If asking for a repository mutation, specify
-the allowed paths and whether to commit or push.
-
-## Open questions
-
-- Which exact GPU model and VRAM will be available?
-- Is the first useful product a local retrieval/tool assistant, a trained small model,
-  or both with separate milestones?
-- Which local documents are licensed and appropriate for training versus retrieval?
-- Which coding task families should remain permanently held out?
-- Should the next tokenizer remain byte-level for comparability, or should we begin a
-  versioned BPE experiment after the baseline corpus is ready?
+> In /home/kill/patern-coding, continue the Porter hook rollout described in
+> Hand_off.md. Scope: activate and verify the existing adapters in both clients
+> using disposable fixtures. Preserve other sessions' edits and normal client
+> trust. Done means evidence of startup context, denial/release, checkpoint
+> restoration, and the exact visible orientation packet when usage is measurable.
+> Report implemented, installed, and observed behavior separately. Defer new
+> features and production publishing until I authorize them.
