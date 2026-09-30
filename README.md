@@ -50,6 +50,11 @@ Agents use `porter_checkin`, `porter_claim`, `porter_note`, `porter_ask_user`, a
 `porter_checkout`; `/porter` (Claude Code) or `$porter` (Codex) runs a sync. Setup,
 semantics and limits: **[docs/PORTER.md](docs/PORTER.md)**.
 
+The [Porter reflexes](docs/PORTER_REFLEXES.md) add automatic lifecycle checkpoints,
+expiring edit leases, and exact one-attempt push approvals. Their repo-local
+installer preserves existing settings and Git hooks; live activation is a separate
+step. See [Hand_off.md](Hand_off.md) for the current milestone and next checks.
+
 ## Earlier research service notes: ChaosRAGJulia
 
 A compact Julia service that unifies a **KFP chaos router**, **HHT/EEMD** time–frequency analytics, and **OpenAI-based RAG** for crypto research.
