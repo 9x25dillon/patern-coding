@@ -87,6 +87,17 @@ def origin():
     return "terminal"
 
 
+def confirmed(via):
+    """Only the user's own terminal carries the user's authority. Directives and answers issued
+    from an agent's shell are proposals until the user confirms them ("terminal (proposed from ...)")."""
+    return via is None or via in USER_VIAS or via.startswith("terminal ")
+
+
+# "user terminal" is written by push_consent after the user types approve in an interactive terminal.
+USER_VIAS = ("terminal", "user terminal")
+CONFIRMED_SQL = "(via IS NULL OR via IN ('terminal', 'user terminal') OR via LIKE 'terminal %')"
+
+
 def agent_name(client):
     """Stable short agent label; it prefixes session ids."""
     client = (client or "").lower()
@@ -197,6 +208,9 @@ class Porter:
         with self._tx():
             for statement in filter(str.strip, SCHEMA.split(";")):
                 self.db.execute(statement)
+            columns = {r["name"] for r in self.db.execute("PRAGMA table_info(directives)")}
+            if "retire_proposed" not in columns:  # additive: a retirement proposed from an agent shell
+                self.db.execute("ALTER TABLE directives ADD COLUMN retire_proposed TEXT")
 
     def close(self):
         self.db.close()
@@ -337,8 +351,13 @@ class Porter:
             cursor = self.db.execute("INSERT INTO directives(project,kind,text,paths,rank,via,created) "
                                      "VALUES(?,?,?,?,?,?,?)", (project, kind, text, json.dumps(paths), rank, via, stamp()))
             directive_id = cursor.lastrowid
-            self._event(project, "user", "directive", f"#{directive_id} {kind}: {text}",
-                        paths=paths, recipient="*", ref=directive_id)
+            if confirmed(via):
+                self._event(project, "user", "directive", f"#{directive_id} {kind}: {text}",
+                            paths=paths, recipient="*", ref=directive_id)
+            else:
+                self._event(project, via, "proposal", f"#{directive_id} {kind}: {text} (not in effect until the user "
+                            f"runs: auric porter confirm directive {directive_id})", paths=paths, recipient="user",
+                            ref=directive_id)
         return directive_id
 
     @staticmethod
@@ -362,17 +381,94 @@ class Porter:
             row = self.db.execute("SELECT * FROM directives WHERE id=?", (directive_id,)).fetchone()
             if row is None or row["retired"]:
                 raise ValueError(f"No active directive #{directive_id}")
-            self.db.execute("UPDATE directives SET retired=? WHERE id=?", (stamp(), directive_id))
+            if not confirmed(via):
+                # Retiring a protect or scope directive would unlock paths: it waits for the user.
+                self.db.execute("UPDATE directives SET retire_proposed=? WHERE id=?", (f"{via} {stamp()}", directive_id))
+                self._event(row["project"], via, "proposal", f"retire #{directive_id} ({row['text']}): not in effect "
+                            f"until the user runs: auric porter confirm retire {directive_id}", recipient="user",
+                            ref=directive_id)
+                return
+            self.db.execute("UPDATE directives SET retired=?, retire_proposed=NULL WHERE id=?", (stamp(), directive_id))
             self._event(row["project"], "user", "retire", f"#{directive_id} retired ({via}): {row['text']}",
                         recipient="*", ref=directive_id)
 
-    def directives(self, project):
-        rows = self.db.execute("SELECT * FROM directives WHERE project IN (?,?) AND retired IS NULL "
-                               "ORDER BY CASE kind WHEN 'priority' THEN 0 WHEN 'scope' THEN 1 WHEN 'protect' THEN 2 "
+    def directives(self, project, *, proposed=False):
+        """The user's directives in effect, or (proposed=True) those proposed from an agent shell."""
+        rows = self.db.execute("SELECT * FROM directives WHERE project IN (?,?) AND retired IS NULL AND " +
+                               ("NOT " if proposed else "") + CONFIRMED_SQL +
+                               " ORDER BY CASE kind WHEN 'priority' THEN 0 WHEN 'scope' THEN 1 WHEN 'protect' THEN 2 "
                                "WHEN 'constraint' THEN 3 ELSE 4 END, rank, id", (project, GLOBAL))
         return [{"id": r["id"], "kind": r["kind"], "text": r["text"], "paths": json.loads(r["paths"]),
                  "rank": r["rank"], "global": r["project"] == GLOBAL, "via": r["via"], "created": r["created"]}
+                | ({"retire_proposed": r["retire_proposed"]} if r["retire_proposed"] else {})
                 for r in rows]
+
+    def proposals(self, project):
+        """Changes proposed from an agent's shell, none of them in effect, with the user's commands."""
+        out = [{"kind": "directive", "id": d["id"], "text": f"{d['kind']}: {d['text']}", "paths": d["paths"],
+                "from": d["via"], "confirm": f"auric porter confirm directive {d['id']}"}
+               for d in self.directives(project, proposed=True)]
+        out += [{"kind": "retire", "id": d["id"], "text": f"retire {d['kind']}: {d['text']}", "paths": d["paths"],
+                 "from": d["retire_proposed"].rsplit(" ", 1)[0], "confirm": f"auric porter confirm retire {d['id']}"}
+                for d in self.directives(project) if d.get("retire_proposed")]
+        out += [{"kind": "answer", "id": q["id"], "text": f"Q{q['id']} {q['question']} -> {q['proposed_answer']}",
+                 "from": q["proposed_via"], "confirm": f"auric porter confirm answer {q['id']}"}
+                for q in self.questions(project) if q.get("proposed_answer")]
+        return out
+
+    def confirm(self, kind, item_id, *, via):
+        """Put an agent-shell proposal into effect. Only from the user's own terminal."""
+        if not confirmed(via):
+            raise ValueError(f"Proposals are confirmed from the user's own terminal, not from {via}")
+        with self._tx():
+            if kind == "directive":
+                row = self.db.execute("SELECT * FROM directives WHERE id=? AND retired IS NULL AND NOT " + CONFIRMED_SQL,
+                                      (item_id,)).fetchone()
+                if row is None:
+                    raise ValueError(f"No proposed directive #{item_id}")
+                self.db.execute("UPDATE directives SET via=? WHERE id=?", (f"terminal (proposed from {row['via']})", item_id))
+                self._event(row["project"], "user", "directive", f"#{item_id} {row['kind']}: {row['text']}",
+                            paths=json.loads(row["paths"]), recipient="*", ref=item_id)
+            elif kind == "retire":
+                row = self.db.execute("SELECT * FROM directives WHERE id=? AND retired IS NULL AND retire_proposed IS NOT NULL",
+                                      (item_id,)).fetchone()
+                if row is None:
+                    raise ValueError(f"No proposed retirement of directive #{item_id}")
+                self.db.execute("UPDATE directives SET retired=?, retire_proposed=NULL WHERE id=?", (stamp(), item_id))
+                self._event(row["project"], "user", "retire", f"#{item_id} retired (proposed from "
+                            f"{row['retire_proposed'].rsplit(' ', 1)[0]}): {row['text']}", recipient="*", ref=item_id)
+            elif kind == "answer":
+                row = self.db.execute("SELECT * FROM questions WHERE id=? AND answered IS NOT NULL AND NOT " + CONFIRMED_SQL,
+                                      (item_id,)).fetchone()
+                if row is None:
+                    raise ValueError(f"No proposed answer to question #{item_id}")
+                self.db.execute("UPDATE questions SET answered=?, via=? WHERE id=?",
+                                (stamp(), f"terminal (proposed from {row['via']})", item_id))
+                self._event(row["project"], "user", "answer", f"Q{item_id} {row['question']}\nAnswer: {row['answer']}",
+                            recipient="*", ref=item_id)
+            else:
+                raise ValueError("Confirm a directive, retire or answer")
+        return {"confirmed": kind, "id": item_id}
+
+    def reject(self, kind, item_id, *, via):
+        """Discard an agent-shell proposal. Only from the user's own terminal."""
+        if not confirmed(via):
+            raise ValueError(f"Proposals are rejected from the user's own terminal, not from {via}")
+        with self._tx():
+            if kind == "directive":
+                changed = self.db.execute("UPDATE directives SET retired=? WHERE id=? AND retired IS NULL AND NOT " +
+                                          CONFIRMED_SQL, (stamp(), item_id)).rowcount
+            elif kind == "retire":
+                changed = self.db.execute("UPDATE directives SET retire_proposed=NULL WHERE id=? AND retire_proposed "
+                                          "IS NOT NULL", (item_id,)).rowcount
+            elif kind == "answer":
+                changed = self.db.execute("UPDATE questions SET answer=NULL, answered=NULL, via=NULL WHERE id=? AND "
+                                          "answered IS NOT NULL AND NOT " + CONFIRMED_SQL, (item_id,)).rowcount
+            else:
+                raise ValueError("Reject a directive, retire or answer")
+            if not changed:
+                raise ValueError(f"No proposed {kind} #{item_id}")
+        return {"rejected": kind, "id": item_id}
 
     # Claims ----------------------------------------------------------------
 
@@ -470,8 +566,8 @@ class Porter:
         """User message to agent sessions."""
         body = text_arg(body, "message")
         with self._tx():
-            return self._event(project, "user", "message", body + ("" if via == "terminal" else f" [via {via}]"),
-                               recipient=to)
+            return self._event(project, "user" if confirmed(via) else via, "message",
+                               body + ("" if via == "terminal" else f" [via {via}]"), recipient=to)
 
     def ask_user(self, session_id, question, *, options=(), context=""):
         question = text_arg(question, "question")
@@ -494,22 +590,36 @@ class Porter:
             row = self.db.execute("SELECT * FROM questions WHERE id=?", (question_id,)).fetchone()
             if row is None:
                 raise ValueError(f"No question #{question_id}")
-            if row["answered"]:
+            if row["answered"] and confirmed(row["via"]):
                 raise ValueError(f"Question #{question_id} was already answered: {row['answer']}")
             self.db.execute("UPDATE questions SET answer=?, answered=?, via=? WHERE id=?",
                             (answer, stamp(), via, question_id))
+            if not confirmed(via):
+                # An agent answering a question for the user is a proposal: the question stays open.
+                self._event(row["project"], via, "proposal", f"Q{question_id} answer proposed: {answer} (not in effect "
+                            f"until the user runs: auric porter confirm answer {question_id})", recipient="user",
+                            ref=question_id)
+                return {"question": question_id, "answered": False, "proposed": True}
             # Broadcast: a user decision binds every session on the project.
-            self._event(row["project"], "user", "answer", f"Q{question_id} {row['question']}\nAnswer: {answer}"
-                        + ("" if via == "terminal" else f" [via {via}]"), recipient="*", ref=question_id)
+            self._event(row["project"], "user", "answer", f"Q{question_id} {row['question']}\nAnswer: {answer}",
+                        recipient="*", ref=question_id)
         return {"question": question_id, "answered": True}
 
     def questions(self, project, *, open_only=True, limit=20):
+        # A question answered only from an agent shell is still open: that answer is a proposal.
         rows = self.db.execute("SELECT * FROM questions WHERE project=? " +
-                               ("AND answered IS NULL " if open_only else "AND answered IS NOT NULL ") +
+                               (f"AND (answered IS NULL OR NOT {CONFIRMED_SQL}) " if open_only
+                                else f"AND answered IS NOT NULL AND {CONFIRMED_SQL} ") +
                                "ORDER BY id " + ("" if open_only else "DESC ") + "LIMIT ?", (project, limit))
-        return [{"id": r["id"], "session": r["session"], "question": r["question"],
+        out = []
+        for r in rows:
+            q = {"id": r["id"], "session": r["session"], "question": r["question"],
                  "options": json.loads(r["options"]), "context": r["context"], "created": r["created"],
-                 "answer": r["answer"], "answered": r["answered"], "via": r["via"]} for r in rows]
+                 "answer": r["answer"], "answered": r["answered"], "via": r["via"]}
+            if r["answered"] and not confirmed(r["via"]):
+                q.update(answer=None, answered=None, via=None, proposed_answer=r["answer"], proposed_via=r["via"])
+            out.append(q)
+        return out
 
     # Views -----------------------------------------------------------------
 
@@ -580,6 +690,9 @@ class Porter:
                                 " - do not edit those; message it if you need them.")
         if not self.session(session_id)["claims"]:
             guidance.append("Claim files with porter_claim before editing them.")
+        if self.proposals(project):
+            guidance.append("awaiting_user_confirmation lists changes proposed from an agent's shell. They are not in "
+                            "effect: do not act on them, and point the user to auric porter status.")
         if me["task"].startswith("(task not stated"):
             guidance.append("State your task with porter_checkin so the user and other sessions can see it.")
 
@@ -594,7 +707,10 @@ class Porter:
                                  (k == "via" and v != "terminal")} for d in directives],
             "waiting_on_user": waiting,
             "user_decisions": [{"id": q["id"], "question": short(q["question"], 300), "answer": q["answer"],
-                                "answered": q["answered"]} for q in decided],
+                                "answered": q["answered"]} | ({"via": q["via"]} if q["via"] not in (None, "terminal") else {})
+                               for q in decided],
+            "awaiting_user_confirmation": [{"kind": p["kind"], "id": p["id"], "text": short(p["text"], 300),
+                                            "from": p["from"]} for p in self.proposals(project)],
             "other_sessions": [{"id": s["id"], "agent": s["agent"], "task": short(s["task"], 300),
                                 "last_seen": ago(s["last_seen"]), "claims": s["claims"]} for s in others],
             "stale_sessions": [{"id": s["id"], "agent": s["agent"], "last_seen": ago(s["last_seen"]),
@@ -614,6 +730,7 @@ class Porter:
         everyone = self.sessions(project)
         for_user = [e for e in self.history(project, limit=200) if e["to"] == "user" and e["kind"] == "message"][-10:]
         return {"project": project, "directives": self.directives(project),
+                "proposed_by_agents": self.proposals(project),
                 "waiting_on_you": self.questions(project),
                 "sessions": [s for s in everyone if s["alive"]],
                 "stale_sessions": [s for s in everyone if not s["alive"]],
@@ -629,8 +746,15 @@ def render_status(status, reference=None):
         out.append('  (none) - set one: auric porter steer "Priority: ..."')
     for d in status["directives"]:
         paths = f"  [{', '.join(d['paths'])}]" if d["paths"] else ""
-        flags = (" global" if d["global"] else "") + ("" if d["via"] == "terminal" else f"  (set from {d['via']})")
+        origin_note = "" if d["via"] == "terminal" else f"  ({d['via'][len('terminal ('):-1]}, confirmed)" \
+            if d["via"].startswith("terminal (") else f"  (set from {d['via']})"
+        flags = (" global" if d["global"] else "") + origin_note
         out.append(f"  #{d['id']} {d['kind']:<10} {d['text']}{paths}{flags}")
+    if status.get("proposed_by_agents"):
+        out += ["", f"Proposed from agent shells, not in effect ({len(status['proposed_by_agents'])})"]
+        for p in status["proposed_by_agents"]:
+            out.append(f"  {p['kind']:<9} #{p['id']} {p['text'][:110]}  (from {p['from']})")
+        out.append("  put one into effect: auric porter confirm <kind> <id>   discard: auric porter reject <kind> <id>")
     out += ["", f"Waiting on you ({len(status['waiting_on_you'])})"]
     for q in status["waiting_on_you"]:
         out.append(f"  Q{q['id']} from {q['session']} ({ago(q['created'], reference)}): {q['question']}")

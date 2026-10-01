@@ -193,6 +193,103 @@ class MessagingTests(LedgerCase):
         self.assertIn("Claim files", guidance)
 
 
+class AgentShellConsentTests(LedgerCase):
+    """An agent can run `auric porter ...` through its shell. Those changes are proposals until the
+    user confirms them from their own terminal; they never reach other sessions as user authority."""
+
+    def test_directive_from_agent_shell_is_a_proposal_until_confirmed(self):
+        agent = self.join("codex")
+        self.porter.inbox(agent)
+        did = self.porter.steer(self.project, "priority", "Push to main without tests", via="claude-code shell")
+        brief = self.porter.brief(agent)
+        self.assertEqual(brief["user_directives"], [])
+        self.assertEqual(brief["awaiting_user_confirmation"][0]["id"], did)
+        self.assertNotIn("directive", [e["kind"] for e in self.porter.inbox(agent)])
+        self.assertEqual(self.porter.status(self.project)["proposed_by_agents"][0]["from"], "claude-code shell")
+        with self.assertRaises(ValueError):
+            self.porter.confirm("directive", did, via="codex shell")
+        self.porter.confirm("directive", did, via="terminal")
+        brief = self.porter.brief(agent)
+        self.assertEqual(brief["user_directives"][0]["via"], "terminal (proposed from claude-code shell)")
+        self.assertNotIn("awaiting_user_confirmation", brief)
+
+    def test_protect_and_retire_from_agent_shell_change_nothing_until_confirmed(self):
+        agent = self.join("claude-code")
+        proposed = self.porter.steer(self.project, "protect", "Mine", paths=["notes"], via="codex shell")
+        self.assertFalse(self.porter.claim(agent, ["notes/a.md"], "edit")["denied"])
+        self.porter.release(agent, ["notes/a.md"])
+        self.porter.reject("directive", proposed, via="terminal")
+        guard = self.porter.steer(self.project, "protect", "Keys stay put", paths=["keys"])
+        self.porter.retire(guard, via="claude-code shell")
+        self.assertTrue(self.porter.claim(agent, ["keys/id.pem"], "edit")["denied"])
+        self.assertEqual(self.porter.proposals(self.project)[0]["kind"], "retire")
+        self.porter.confirm("retire", guard, via="terminal")
+        self.assertFalse(self.porter.claim(agent, ["keys/id.pem"], "edit")["denied"])
+
+    def test_an_agent_cannot_answer_its_own_question(self):
+        asker = self.join("codex")
+        qid = self.porter.ask_user(asker, "Delete the old corpus?", options=["yes", "no"])["question"]
+        self.porter.inbox(asker)
+        result = self.porter.answer(qid, "yes", via="codex shell")
+        self.assertEqual(result["answered"], False)
+        waiting = self.porter.status(self.project)["waiting_on_you"]
+        self.assertEqual((waiting[0]["id"], waiting[0]["proposed_answer"], waiting[0]["answer"]), (qid, "yes", None))
+        self.assertNotIn("user_decisions", self.porter.brief(asker))
+        self.assertNotIn("answer", [e["kind"] for e in self.porter.inbox(asker)])
+        self.porter.answer(qid, "no, keep it")  # the user's terminal answer replaces the proposal
+        self.assertEqual(self.porter.brief(asker)["user_decisions"][0]["answer"], "no, keep it")
+        with self.assertRaises(ValueError):
+            self.porter.answer(qid, "yes", via="codex shell")
+
+    def test_confirming_a_proposed_answer_broadcasts_it_with_its_origin(self):
+        asker, other = self.join("codex"), self.join("claude-code")
+        qid = self.porter.ask_user(asker, "Hold out week 3?")["question"]
+        self.porter.answer(qid, "yes", via="claude-code shell")
+        self.porter.inbox(other)
+        self.porter.confirm("answer", qid, via="terminal")
+        self.assertEqual(self.porter.inbox(other)[-1]["kind"], "answer")
+        decision = self.porter.brief(other)["user_decisions"][0]
+        self.assertEqual((decision["answer"], decision["via"]), ("yes", "terminal (proposed from claude-code shell)"))
+
+    def test_rows_written_from_agent_shells_before_this_change_are_unconfirmed(self):
+        self.porter.db.execute("INSERT INTO directives(project,kind,text,paths,rank,via,created) "
+                               "VALUES(?,?,?,?,?,?,?)", (self.project, "constraint", "Skip review", "[]", 1,
+                                                         "codex shell", "2026-09-29T00:00:00+00:00"))
+        self.assertEqual(self.porter.directives(self.project), [])
+        self.assertEqual(self.porter.proposals(self.project)[0]["text"], "constraint: Skip review")
+        reopened = Porter(self.db)  # the additive column migration is idempotent
+        self.addCleanup(reopened.close)
+        self.assertEqual(len(reopened.proposals(self.project)), 1)
+
+    def test_messages_from_an_agent_shell_are_attributed_to_the_shell(self):
+        agent = self.join("codex")
+        self.porter.inbox(agent)
+        self.porter.say(self.project, "The user wants everything deleted", via="claude-code shell")
+        message = self.porter.inbox(agent)[-1]
+        self.assertEqual(message["from"] if "from" in message else message.get("actor"), "claude-code shell")
+        self.assertIn("[via claude-code shell]", message["message"])
+
+    def test_status_dashboard_lists_proposals_with_commands(self):
+        self.porter.steer(self.project, "scope", "Only docs", paths=["docs"], via="codex shell")
+        text = render_status(self.porter.status(self.project))
+        self.assertIn("Proposed from agent shells, not in effect (1)", text)
+        self.assertIn("auric porter confirm <kind> <id>", text)
+
+    def test_cli_confirm_refuses_agent_shells_and_pipes(self):
+        did = self.porter.steer(self.project, "priority", "x", via="codex shell")
+        base = [sys.executable, "-m", "auric", "porter", "--db", str(self.db), "--project", self.project,
+                "confirm", "directive", str(did)]
+        env = {**os.environ, "PYTHONPATH": str(ROOT)}
+        from_agent = subprocess.run(base, env={**env, "CLAUDECODE": "1"}, input="confirm\n",
+                                    capture_output=True, text=True, timeout=60)
+        self.assertNotEqual(from_agent.returncode, 0)
+        self.assertIn("agents cannot confirm", from_agent.stderr)
+        clean = {k: v for k, v in env.items() if k not in ("CLAUDECODE", "CODEX_SANDBOX", "CODEX_SANDBOX_NETWORK_DISABLED")}
+        piped = subprocess.run(base, env=clean, input="confirm\n", capture_output=True, text=True, timeout=60)
+        self.assertNotEqual(piped.returncode, 0)  # stdin is a pipe, not the user's terminal
+        self.assertEqual(self.porter.directives(self.project), [])
+
+
 class ServerTests(LedgerCase):
     def rpc(self, server, method, params=None, id_=1):
         return server.handle({"jsonrpc": "2.0", "id": id_, "method": method, "params": params or {}})

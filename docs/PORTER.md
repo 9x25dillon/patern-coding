@@ -64,6 +64,8 @@ auric porter steer "Work only in auric/, docs/, tests/" --kind scope --paths aur
 auric porter steer "Leave the Julia project alone" --kind protect --paths MessageVectorizer
 auric porter steer "Small, reviewable patches" --kind preference --global
 auric porter answer 3 "Hold out all of week 3"       # every session is notified
+auric porter confirm directive 7                     # put a change an agent proposed from its shell into effect
+auric porter reject answer 4                         # discard one
 auric porter say "Pause edits; I'm rebasing" --to codex
 auric porter retire 2
 auric porter end codex-4f74                          # release a stuck session's claims
@@ -121,9 +123,19 @@ shows them to the model; `AGENTS.md` and the skill cover the rest.
   started tomorrow. Your answers and directive changes are broadcast to every session
   on the project, because your decisions bind all of them.
 - **User-only actions.** Agents get no MCP tool to write directives or answers. An
-  agent could still run `auric porter steer` through its shell. That is not blocked,
-  but it is labelled: the ledger records `set from claude-code shell` (or `codex
-  shell`), and both `status` and the agents' brief show it.
+  agent can still run `auric porter steer`, `answer` or `retire` through its shell
+  (detected by `CLAUDECODE` or the Codex sandbox variables). Those become
+  **proposals**: they are recorded with their origin, listed under "Proposed from
+  agent shells" in `status` and as `awaiting_user_confirmation` in the brief, and
+  have no effect until you run `auric porter confirm <kind> <id>` in your own
+  interactive terminal. Until then a proposed directive binds no one and denies no
+  claim, a proposed retirement leaves the directive in force, and a question answered
+  by an agent stays open. `confirm` and `reject` refuse to run from an agent's shell
+  or without a TTY, the same rule as `approve-push`. Like push consent, this is a
+  local workflow gate, not protection against a process that edits the ledger
+  directly. Messages an agent sends with `auric porter say` are attributed to its
+  shell, not to you. Rows written from agent shells by earlier versions count as
+  proposals too.
 - **The base MCP protocol is pull-based.** The skill and `AGENTS.md` tell agents to
   check the inbox between steps. Optional [lifecycle reflexes](PORTER_REFLEXES.md)
   add automatic startup context, edit-lease checks, and compaction checkpoints;
