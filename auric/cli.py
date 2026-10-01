@@ -148,6 +148,11 @@ def parser():
     st = psub.add_parser("answer", help="Answer a question from a session; every session is notified")
     st.add_argument("id", type=int)
     st.add_argument("text")
+    for name, verb in (("confirm", "Put a change proposed from an agent's shell into effect (your terminal only)"),
+                       ("reject", "Discard a change proposed from an agent's shell")):
+        st = psub.add_parser(name, help=verb)
+        st.add_argument("kind", choices=("directive", "retire", "answer"))
+        st.add_argument("id", type=int)
     st = psub.add_parser("say", help="Message the sessions (all by default)")
     st.add_argument("text")
     st.add_argument("--to", default="*", help="Session id or agent name (claude-code, codex)")
@@ -184,10 +189,23 @@ def porter_command(args):
             emit({"retired": args.id})
         elif cmd == "answer":
             emit(porter.answer(args.id, args.text, via=via))
+        elif cmd in ("confirm", "reject"):
+            # Like approve-push: the user's own interactive terminal, never an agent's shell or a pipe.
+            if via != "terminal" or not sys.stdin.isatty():
+                raise SystemExit(f"auric porter {cmd} runs in your own interactive terminal; agents cannot {cmd} proposals")
+            match = [p for p in porter.proposals(project) if p["kind"] == args.kind and p["id"] == args.id]
+            if not match:
+                raise SystemExit(f"No proposed {args.kind} #{args.id} in {project}; see auric porter status")
+            print(f"{args.kind} #{args.id}: {match[0]['text']}\n  proposed from {match[0]['from']}")
+            if cmd == "confirm" and input("Type confirm to put it into effect: ").strip() != "confirm":
+                print("Nothing changed.")
+                return 1
+            emit(getattr(porter, cmd)(args.kind, args.id, via=via))
         elif cmd == "say":
             emit({"event": porter.say(project, args.text, to=args.to, via=via), "to": args.to})
         elif cmd == "end":
-            emit(porter.end(args.session, args.reason + ("" if via == "terminal" else f" [via {via}]"), actor="user"))
+            emit(porter.end(args.session, args.reason + ("" if via == "terminal" else f" [via {via}]"),
+                            actor="user" if via == "terminal" else via))
         elif cmd == "history":
             emit(porter.history(project, query=args.query, kinds=args.kinds, limit=args.limit))
         elif cmd == "watch":
